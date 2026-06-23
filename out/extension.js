@@ -1,0 +1,489 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.deactivate = exports.activate = void 0;
+const vscode = __importStar(require("vscode"));
+const path = __importStar(require("path"));
+const fs = __importStar(require("fs"));
+const cp = __importStar(require("child_process"));
+const os = __importStar(require("os"));
+// ─── Extension Entry Point ───────────────────────────────────────────────
+function activate(context) {
+    // 1. Debug configuration provider
+    const debugProvider = new SkinkDebugConfigurationProvider();
+    context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('Skink', debugProvider));
+    // 2. Test controller
+    const testController = new SkinkTestController();
+    context.subscriptions.push(testController);
+    testController.discoverAll();
+    // 3. Commands
+    context.subscriptions.push(vscode.commands.registerCommand('skink.runTests', () => testController.runAll()), vscode.commands.registerCommand('skink.runTestFile', (uri) => testController.runFile(uri)), vscode.commands.registerCommand('skink.refreshTests', () => testController.discoverAll()));
+    // 4. File watchers for test discovery
+    const testWatcher = vscode.workspace.createFileSystemWatcher('**/*_test.skink');
+    context.subscriptions.push(testWatcher.onDidCreate((uri) => testController.addFile(uri)), testWatcher.onDidChange((uri) => testController.refreshFile(uri)), testWatcher.onDidDelete((uri) => testController.removeFile(uri)), testWatcher);
+}
+exports.activate = activate;
+function deactivate() {
+    // Nothing to clean up
+}
+exports.deactivate = deactivate;
+// ─── Compiler Discovery ──────────────────────────────────────────────────
+async function findSkinkCompiler(configCompilerPath, folder) {
+    // 1. From explicit configuration
+    if (configCompilerPath && configCompilerPath.trim()) {
+        if (fs.existsSync(configCompilerPath)) {
+            return configCompilerPath;
+        }
+    }
+    // 2. From VS Code settings (lowercase key to match package.json)
+    const settingsPath = vscode.workspace.getConfiguration('skink').get('compilerPath');
+    if (settingsPath && settingsPath.trim()) {
+        if (fs.existsSync(settingsPath)) {
+            return settingsPath;
+        }
+    }
+    // 3. Repository relative layout (extension inside repo)
+    const repoPaths = [
+        path.resolve(__dirname, '../../skink/compiler/skink'),
+        path.resolve(__dirname, '../../skink/compiler/skink.exe'),
+        path.resolve(__dirname, '../../compiler/skink'),
+        path.resolve(__dirname, '../../compiler/skink.exe'),
+        path.resolve(__dirname, '../../skink/compiler/cmd/skink/skink'),
+        path.resolve(__dirname, '../../skink/compiler/cmd/skink/skink.exe'),
+        path.resolve(__dirname, '../../compiler/cmd/skink/skink'),
+        path.resolve(__dirname, '../../compiler/cmd/skink/skink.exe'),
+        path.resolve(__dirname, '../../skink'),
+        path.resolve(__dirname, '../../skink.exe'),
+    ];
+    for (const p of repoPaths) {
+        if (fs.existsSync(p)) {
+            return p;
+        }
+    }
+    // 4. Workspace relative
+    if (folder) {
+        const wsPaths = [
+            path.resolve(folder.uri.fsPath, 'skink/compiler/cmd/skink/skink'),
+            path.resolve(folder.uri.fsPath, 'compiler/cmd/skink/skink'),
+            path.resolve(folder.uri.fsPath, 'skink'),
+        ];
+        for (const p of wsPaths) {
+            if (fs.existsSync(p)) {
+                return p;
+            }
+        }
+    }
+    // 5. PATH lookup
+    const exeName = os.platform() === 'win32' ? 'skink.exe' : 'skink';
+    const envPaths = (process.env.PATH || '').split(path.delimiter);
+    for (const p of envPaths) {
+        const fullPath = path.join(p, exeName);
+        if (fs.existsSync(fullPath)) {
+            return fullPath;
+        }
+    }
+    return undefined;
+}
+function getSkinkHome(configSkinkHome, folder) {
+    // 1. Explicit
+    if (configSkinkHome && configSkinkHome.trim()) {
+        return configSkinkHome;
+    }
+    // 2. Settings
+    const settingsHome = vscode.workspace.getConfiguration('skink').get('skinkHome');
+    if (settingsHome && settingsHome.trim()) {
+        return settingsHome;
+    }
+    // 3. Env
+    if (process.env.SKINK_HOME) {
+        return process.env.SKINK_HOME;
+    }
+    // 4. Repo relative
+    const repoHomes = [
+        path.resolve(__dirname, '../../skink/compiler'),
+        path.resolve(__dirname, '../../compiler'),
+    ];
+    for (const h of repoHomes) {
+        if (fs.existsSync(path.join(h, 'lib', 'testing.skink'))) {
+            return h;
+        }
+    }
+    // 5. Workspace relative
+    if (folder) {
+        const wsHome = path.resolve(folder.uri.fsPath, 'skink/compiler');
+        if (fs.existsSync(path.join(wsHome, 'lib', 'testing.skink'))) {
+            return wsHome;
+        }
+    }
+    return undefined;
+}
+// ─── Debug Configuration Provider ──────────────────────────────────────────
+class SkinkDebugConfigurationProvider {
+    getOutputChannel() {
+        if (!this.outputChannel) {
+            this.outputChannel = vscode.window.createOutputChannel('Skink Build');
+        }
+        return this.outputChannel;
+    }
+    async resolveDebugConfigurationWithSubstitutedVariables(folder, config, token) {
+        // Default to active editor if no program specified
+        if (!config.program) {
+            const activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor && activeEditor.document.languageId === 'Skink') {
+                config.program = activeEditor.document.fileName;
+            }
+            else {
+                vscode.window.showErrorMessage('No Skink file is currently open to debug.');
+                return null;
+            }
+        }
+        const programPath = config.program;
+        if (!fs.existsSync(programPath)) {
+            vscode.window.showErrorMessage(`Skink program file does not exist: ${programPath}`);
+            return null;
+        }
+        // Find compiler
+        const compilerPath = await findSkinkCompiler(config.compilerPath, folder);
+        if (!compilerPath) {
+            vscode.window.showErrorMessage('Could not find the Skink compiler ("skink"). Please configure "skink.compilerPath" in your settings.');
+            return null;
+        }
+        const skinkHome = getSkinkHome(config.skinkHome, folder);
+        const parsedPath = path.parse(programPath);
+        const outBinaryName = parsedPath.name + (os.platform() === 'win32' ? '.exe' : '');
+        const outBinaryPath = path.join(parsedPath.dir, outBinaryName);
+        const output = this.getOutputChannel();
+        output.clear();
+        output.appendLine(`[Skink Build] Compiling: ${programPath}`);
+        output.appendLine(`[Skink Build] Using compiler: ${compilerPath}`);
+        if (skinkHome) {
+            output.appendLine(`[Skink Build] SKINK_HOME: ${skinkHome}`);
+        }
+        output.appendLine(`[Skink Build] Output binary: ${outBinaryPath}`);
+        output.show(true);
+        try {
+            await compileSkink(compilerPath, programPath, outBinaryPath, output, skinkHome, token);
+        }
+        catch (err) {
+            vscode.window.showErrorMessage('Skink Compilation Failed. See output for more details.');
+            return null;
+        }
+        output.appendLine('[Skink Build] Compilation successful! Invoking native debugger...');
+        // Check which native debugger extensions are installed
+        const codeLldbExtension = vscode.extensions.getExtension('vadimcn.vscode-lldb');
+        const cpptoolsExtension = vscode.extensions.getExtension('ms-vscode.cpptools');
+        const args = config.args || [];
+        if (codeLldbExtension) {
+            output.appendLine('[Skink Build] Target native debugger: CodeLLDB (type: "lldb")');
+            config.type = 'lldb';
+            config.request = 'launch';
+            config.program = outBinaryPath;
+            config.args = args;
+            config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
+            // CodeLLDB specific: enable source mapping if needed
+            config.sourceMap = config.sourceMap || {};
+        }
+        else if (cpptoolsExtension) {
+            output.appendLine('[Skink Build] Target native debugger: C/C++ Extension (type: "cppdbg")');
+            config.type = 'cppdbg';
+            config.request = 'launch';
+            config.program = outBinaryPath;
+            config.args = args;
+            config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
+            config.MIMode = os.platform() === 'darwin' ? 'lldb' : 'gdb';
+            config.environment = config.environment || [];
+            config.externalConsole = false;
+        }
+        else {
+            vscode.window.showWarningMessage('To debug Skink code, install the "CodeLLDB" or "C/C++" (ms-vscode.cpptools) extensions for native debugging.', 'Install CodeLLDB').then(selection => {
+                if (selection === 'Install CodeLLDB') {
+                    vscode.commands.executeCommand('workbench.extensions.installExtension', 'vadimcn.vscode-lldb');
+                }
+            });
+            config.type = 'lldb';
+            config.request = 'launch';
+            config.program = outBinaryPath;
+            config.args = args;
+            config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
+        }
+        return config;
+    }
+}
+// ─── Compilation Helper ──────────────────────────────────────────────────
+function compileSkink(compilerPath, programPath, outBinaryPath, output, skinkHome, token) {
+    return new Promise((resolve, reject) => {
+        if (token?.isCancellationRequested) {
+            return reject(new Error('Compilation cancelled.'));
+        }
+        const args = ['-o', outBinaryPath, programPath];
+        const env = { ...process.env };
+        if (skinkHome) {
+            env.SKINK_HOME = skinkHome;
+        }
+        const child = cp.spawn(compilerPath, args, { env });
+        let errOutput = '';
+        child.stdout.on('data', (data) => {
+            output.append(data.toString());
+        });
+        child.stderr.on('data', (data) => {
+            const str = data.toString();
+            errOutput += str;
+            output.append(str);
+        });
+        token?.onCancellationRequested(() => {
+            child.kill();
+            reject(new Error('Compilation cancelled.'));
+        });
+        child.on('error', (err) => {
+            output.appendLine(`[Skink Build Error] Failed to run compiler: ${err.message}`);
+            reject(err);
+        });
+        child.on('exit', (code) => {
+            if (code === 0) {
+                resolve();
+            }
+            else {
+                output.appendLine(`[Skink Build Error] Compiler exited with code ${code}`);
+                reject(new Error(`Exit code ${code}. ${errOutput}`));
+            }
+        });
+    });
+}
+// ─── Test Controller ───────────────────────────────────────────────────
+class SkinkTestController {
+    constructor() {
+        this.fileItems = new Map();
+        this.ctrl = vscode.tests.createTestController('skinkTests', 'Skink Tests');
+        this.ctrl.resolveHandler = async (item) => {
+            if (!item) {
+                this.discoverAll();
+            }
+            else if (item.uri && item.uri.fsPath.endsWith('_test.skink')) {
+                await this.parseTestsInFile(item);
+            }
+        };
+        this.ctrl.createRunProfile('Run', vscode.TestRunProfileKind.Run, (request, token) => this.runHandler(request, token), true);
+    }
+    dispose() {
+        this.ctrl.dispose();
+        this.runOutput?.dispose();
+    }
+    async discoverAll() {
+        this.ctrl.items.replace([]);
+        this.fileItems.clear();
+        if (!vscode.workspace.workspaceFolders) {
+            return;
+        }
+        const seen = new Set();
+        for (const folder of vscode.workspace.workspaceFolders) {
+            const uris = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, '**/*_test.skink'));
+            for (const uri of uris) {
+                if (!seen.has(uri.fsPath)) {
+                    seen.add(uri.fsPath);
+                    this.addFile(uri);
+                }
+            }
+        }
+    }
+    addFile(uri) {
+        const existing = this.fileItems.get(uri.fsPath);
+        if (existing) {
+            return;
+        }
+        const fileName = path.basename(uri.fsPath);
+        const item = this.ctrl.createTestItem(uri.fsPath, fileName, uri);
+        item.canResolveChildren = true;
+        this.ctrl.items.add(item);
+        this.fileItems.set(uri.fsPath, item);
+    }
+    removeFile(uri) {
+        const item = this.fileItems.get(uri.fsPath);
+        if (item) {
+            this.ctrl.items.delete(item.id);
+            this.fileItems.delete(uri.fsPath);
+        }
+    }
+    refreshFile(uri) {
+        const item = this.fileItems.get(uri.fsPath);
+        if (item) {
+            item.children.replace([]);
+            item.canResolveChildren = true;
+        }
+    }
+    async parseTestsInFile(fileItem) {
+        if (!fileItem.uri) {
+            return;
+        }
+        const content = await fs.promises.readFile(fileItem.uri.fsPath, 'utf-8');
+        const lines = content.split('\n');
+        const children = [];
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            // Match: fn TestName(...) or pub fn TestName(...)
+            const match = /\bfn\s+(Test[A-Za-z0-9_]*)\s*\(/.exec(line);
+            if (match) {
+                const testName = match[1];
+                const testId = `${fileItem.uri.fsPath}#${testName}`;
+                const testItem = this.ctrl.createTestItem(testId, testName, fileItem.uri);
+                testItem.range = new vscode.Range(i, 0, i, line.length);
+                children.push(testItem);
+            }
+        }
+        fileItem.children.replace(children);
+        fileItem.canResolveChildren = false;
+    }
+    async runHandler(request, token) {
+        const run = this.ctrl.createTestRun(request);
+        const queue = [];
+        if (request.include) {
+            queue.push(...request.include);
+        }
+        else {
+            this.ctrl.items.forEach((item) => queue.push(item));
+        }
+        if (!this.runOutput) {
+            this.runOutput = vscode.window.createOutputChannel('Skink Test');
+        }
+        this.runOutput.clear();
+        this.runOutput.show(true);
+        const compilerPath = await findSkinkCompiler();
+        if (!compilerPath) {
+            vscode.window.showErrorMessage('Could not find skink compiler for running tests.');
+            this.runOutput.appendLine('[Skink Test] ERROR: skink compiler not found.');
+            run.end();
+            return;
+        }
+        const skinkHome = getSkinkHome();
+        while (queue.length > 0 && !token.isCancellationRequested) {
+            const item = queue.shift();
+            if (item.uri && item.uri.fsPath.endsWith('_test.skink')) {
+                await this.runTestFile(item, run, token, compilerPath, skinkHome);
+            }
+            else {
+                // It's a single test within a file
+                const parent = this.findParentFile(item);
+                if (parent) {
+                    await this.runSingleTest(parent, item, run, token, compilerPath, skinkHome);
+                }
+            }
+        }
+        run.end();
+    }
+    async runTestFile(fileItem, run, token, compilerPath, skinkHome) {
+        if (!fileItem.uri) {
+            return;
+        }
+        await this.parseTestsInFile(fileItem);
+        const folder = vscode.workspace.getWorkspaceFolder(fileItem.uri);
+        const cwd = folder ? folder.uri.fsPath : path.dirname(fileItem.uri.fsPath);
+        this.runOutput?.appendLine(`[Skink Test] Running ${path.basename(fileItem.uri.fsPath)}...`);
+        const start = Date.now();
+        const env = { ...process.env };
+        if (skinkHome) {
+            env.SKINK_HOME = skinkHome;
+        }
+        const child = cp.spawn(compilerPath, ['test', path.basename(fileItem.uri.fsPath, '_test.skink')], {
+            cwd,
+            env,
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => { stdout += d.toString(); this.runOutput?.append(d.toString()); });
+        child.stderr.on('data', (d) => { stderr += d.toString(); this.runOutput?.append(d.toString()); });
+        await new Promise((resolve) => {
+            child.on('exit', () => resolve());
+            token.onCancellationRequested(() => { child.kill(); resolve(); });
+        });
+        const elapsed = Date.now() - start;
+        // Parse output to mark individual tests
+        const lines = (stdout + '\n' + stderr).split('\n');
+        let anyFailed = false;
+        fileItem.children.forEach((testItem) => {
+            const testName = testItem.label;
+            let found = false;
+            let passed = true;
+            for (const line of lines) {
+                if (line.includes(testName)) {
+                    found = true;
+                    if (line.startsWith('FAIL') || line.includes('FAIL')) {
+                        passed = false;
+                        anyFailed = true;
+                    }
+                    break;
+                }
+            }
+            if (!found && (stdout + stderr).includes('FAIL')) {
+                passed = false;
+                anyFailed = true;
+            }
+            if (passed) {
+                run.passed(testItem, elapsed / fileItem.children.size);
+            }
+            else {
+                run.failed(testItem, new vscode.TestMessage('Test failed. See Skink Test output for details.'), elapsed / fileItem.children.size);
+            }
+        });
+        if (!anyFailed) {
+            run.passed(fileItem, elapsed);
+        }
+        else {
+            run.failed(fileItem, new vscode.TestMessage('One or more tests failed. See Skink Test output.'), elapsed);
+        }
+    }
+    async runSingleTest(parent, _testItem, run, token, compilerPath, skinkHome) {
+        // Run the whole file but only report the single test
+        await this.runTestFile(parent, run, token, compilerPath, skinkHome);
+    }
+    findParentFile(testItem) {
+        let result;
+        this.ctrl.items.forEach((item) => {
+            item.children.forEach((child) => {
+                if (child.id === testItem.id) {
+                    result = item;
+                }
+            });
+        });
+        return result;
+    }
+    runAll() {
+        const request = new vscode.TestRunRequest();
+        this.runHandler(request, new vscode.CancellationTokenSource().token);
+    }
+    runFile(uri) {
+        const item = this.fileItems.get(uri.fsPath);
+        if (!item) {
+            this.addFile(uri);
+            const newItem = this.fileItems.get(uri.fsPath);
+            if (newItem) {
+                const request = new vscode.TestRunRequest([newItem]);
+                this.runHandler(request, new vscode.CancellationTokenSource().token);
+            }
+            return;
+        }
+        const request = new vscode.TestRunRequest([item]);
+        this.runHandler(request, new vscode.CancellationTokenSource().token);
+    }
+}
+//# sourceMappingURL=extension.js.map

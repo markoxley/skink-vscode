@@ -1,0 +1,300 @@
+{
+  "Function Declaration": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:params})${3: -> ${4:return_type}} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Declare a new function"
+  },
+  "Public Function": {
+    "prefix": "pubfn",
+    "body": [
+      "pub fn ${1:name}(${2:params})${3: -> ${4:return_type}} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Declare a public function"
+  },
+  "Struct Declaration": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "    ${2:field}: ${3:type}",
+      "}"
+    ],
+    "description": "Declare a new struct"
+  },
+  "Generic Struct": {
+    "prefix": "gstruct",
+    "body": [
+      "struct ${1:Name}<${2:T}> {",
+      "    ${3:field}: ${4:$2}",
+      "}"
+    ],
+    "description": "Declare a generic struct"
+  },
+  "Enum Declaration": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "    ${2:Variant},",
+      "    ${3:Variant}",
+      "}"
+    ],
+    "description": "Declare a new enum"
+  },
+  "If Statement": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "If statement"
+  },
+  "If-Else Statement": {
+    "prefix": "ife",
+    "body": [
+      "if ${1:condition} {",
+      "    ${2}",
+      "} else {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "If-else statement"
+  },
+  "For-In Loop": {
+    "prefix": "forin",
+    "body": [
+      "for ${1:item} in ${2:collection} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "For-in loop"
+  },
+  "C-Style For Loop": {
+    "prefix": "forc",
+    "body": [
+      "for ${1:i} := ${2:0}; ${3:i < n}; ${4:i++} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "C-style for loop"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "While loop"
+  },
+  "Until Loop": {
+    "prefix": "until",
+    "body": [
+      "until ${1:condition} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Until loop"
+  },
+  "Match Expression": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "    ${2:pattern} => ${3:expression},",
+      "    _ => ${0}",
+      "}"
+    ],
+    "description": "Match expression"
+  },
+  "Defer Statement": {
+    "prefix": "defer",
+    "body": [
+      "defer ${0:expression}"
+    ],
+    "description": "Defer statement"
+  },
+  "Unsafe Block": {
+    "prefix": "unsafe",
+    "body": [
+      "unsafe {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Unsafe block"
+  },
+  "Service Definition": {
+    "prefix": "service",
+    "body": [
+      "service ${1:Name} {",
+      "    fn ${2:method}(${3:params})${4: -> ${5:return_type}}",
+      "}"
+    ],
+    "description": "Service definition"
+  },
+  "Ruleset": {
+    "prefix": "ruleset",
+    "body": [
+      "ruleset ${1:Name} {",
+      "    rule ${2:rule_name} when ${3:condition} {",
+      "        action: ${4:expression}",
+      "        priority: ${5:1}",
+      "    }",
+      "}"
+    ],
+    "description": "Ruleset declaration"
+  },
+  "Import": {
+    "prefix": "import",
+    "body": [
+      "import \"${1:path}\""
+    ],
+    "description": "Import a module"
+  },
+  "Import Block": {
+    "prefix": "importb",
+    "body": [
+      "import {",
+      "    \"${1:path}\"",
+      "    \"${2:path}\"",
+      "}"
+    ],
+    "description": "Import multiple modules"
+  },
+  "Module": {
+    "prefix": "module",
+    "body": [
+      "module ${1:name}"
+    ],
+    "description": "Module declaration"
+  },
+  "Select Statement": {
+    "prefix": "select",
+    "body": [
+      "select {",
+      "    case ${1:v} := <-${2:ch}:",
+      "        ${3}",
+      "    default:",
+      "        ${0}",
+      "}"
+    ],
+    "description": "Select statement for channels"
+  },
+  "Spawn": {
+    "prefix": "spawn",
+    "body": [
+      "spawn ${1:function}(${2:args})"
+    ],
+    "description": "Spawn a new thread"
+  },
+  "Async/Await": {
+    "prefix": "async",
+    "body": [
+      "${1:handle} := async ${2:expression}",
+      "${3:result} := await ${4:$1}"
+    ],
+    "description": "Async and await"
+  },
+  "Comptime Block": {
+    "prefix": "comptime",
+    "body": [
+      "comptime {",
+      "    assert(${1:condition})",
+      "}"
+    ],
+    "description": "Compile-time assertion block"
+  },
+  "With Block": {
+    "prefix": "with",
+    "body": [
+      "with ${1:var} = ${2:expression} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "With RAII block"
+  },
+  "Print": {
+    "prefix": "print",
+    "body": [
+      "print(${1:\"${2:message}\"})"
+    ],
+    "description": "Print statement"
+  },
+  "Error Return": {
+    "prefix": "errret",
+    "body": [
+      "return ${1:zero_value}, error(${2:1}, \"${3:message}\")"
+    ],
+    "description": "Return an error"
+  },
+  "Error Propagation": {
+    "prefix": "errprop",
+    "body": [
+      "${1:value} := ${2:expression}?"
+    ],
+    "description": "Error propagation with ?"
+  },
+  "Constant Block": {
+    "prefix": "constb",
+    "body": [
+      "const {",
+      "    ${1:NAME} = ${2:value}",
+      "}"
+    ],
+    "description": "Constant block"
+  },
+  "Variable Block": {
+    "prefix": "varb",
+    "body": [
+      "var {",
+      "    ${1:name}: ${2:type} = ${3:value}",
+      "}"
+    ],
+    "description": "Variable block"
+  },
+  "Tensor Declaration": {
+    "prefix": "tensor",
+    "body": [
+      "${1:name} := tensor<${2:float}>::${3:zeros}([${4:shape}])"
+    ],
+    "description": "Tensor declaration"
+  },
+  "Channel": {
+    "prefix": "chan",
+    "body": [
+      "${1:ch} := make(chan ${2:int})"
+    ],
+    "description": "Channel creation"
+  },
+  "Extern Block": {
+    "prefix": "extern",
+    "body": [
+      "extern \"${1:C}\" {",
+      "    fn ${2:name}(${3:params})${4: -> ${5:return_type}}",
+      "}"
+    ],
+    "description": "External function declarations"
+  },
+  "Doc Comment": {
+    "prefix": "doc",
+    "body": [
+      "/// ${1:Summary}",
+      "///",
+      "/// # Arguments",
+      "/// * `${2:param}` - ${3:Description}",
+      "///",
+      "/// # Returns",
+      "/// ${4:Description}",
+      "///",
+      "/// # Examples",
+      "/// ```",
+      "/// ${5:example}",
+      "/// ```"
+    ],
+    "description": "Documentation comment block"
+  }
+}

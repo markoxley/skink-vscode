@@ -1,0 +1,172 @@
+{
+  "name": "skink-lang",
+  "displayName": "Skink Language Support",
+  "description": "Syntax highlighting, snippets, testing, and debugging for the Skink programming language.",
+  "version": "0.3.0",
+  "publisher": "skink-lang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Debuggers",
+    "Testing"
+  ],
+  "keywords": [
+    "Skink",
+    "robotics",
+    "ai",
+    "language",
+    "debug",
+    "test"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onDebug",
+    "onLanguage:Skink",
+    "onDebugResolve:Skink",
+    "workspaceContains:**/*.skink"
+  ],
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^16.x",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^4.9.5"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "Skink",
+        "aliases": [
+          "Skink",
+          "skink"
+        ],
+        "extensions": [
+          ".skink"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "Skink",
+        "scopeName": "source.skink",
+        "path": "./syntaxes/Skink.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "Skink",
+        "path": "./snippets/Skink.json"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "Skink",
+        "label": "Skink Debug",
+        "languages": [
+          "Skink"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path to the Skink target program (.skink file) to compile and launch.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "description": "Command line arguments passed to the Skink program.",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "compilerPath": {
+                "type": "string",
+                "description": "Optional path to the skink compiler executable.",
+                "default": ""
+              },
+              "skinkHome": {
+                "type": "string",
+                "description": "Optional SKINK_HOME directory (contains lib/testing.skink and std/ libraries).",
+                "default": ""
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "Skink",
+            "request": "launch",
+            "name": "Launch Skink File",
+            "program": "${file}"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Skink Language Configuration",
+      "properties": {
+        "skink.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "The absolute path or executable name for the Skink compiler (skink)."
+        },
+        "skink.skinkHome": {
+          "type": "string",
+          "default": "",
+          "description": "The SKINK_HOME directory containing lib/ and std/ folders."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "skink.runTests",
+        "title": "Run Skink Tests",
+        "category": "Skink",
+        "icon": "$(play)"
+      },
+      {
+        "command": "skink.runTestFile",
+        "title": "Run Skink Test File",
+        "category": "Skink",
+        "icon": "$(play-circle)"
+      },
+      {
+        "command": "skink.refreshTests",
+        "title": "Refresh Skink Tests",
+        "category": "Skink",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "skink.runTestFile",
+          "when": "resourceExtname == .skink",
+          "group": "navigation@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "skink.refreshTests",
+          "when": "view == workbench.view.testing",
+          "group": "navigation@2"
+        }
+      ]
+    }
+  }
+}
