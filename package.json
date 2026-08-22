@@ -2,8 +2,9 @@
   "name": "skink-lang",
   "displayName": "Skink Language Support",
   "description": "Syntax highlighting, snippets, testing, and debugging for the Skink programming language.",
-  "version": "0.3.0",
+  "version": "0.5.1",
   "publisher": "skink-lang",
+  "icon": "icon.png",
   "license": "MIT",
   "engines": {
     "vscode": "^1.74.0"
@@ -12,7 +13,9 @@
     "Programming Languages",
     "Snippets",
     "Debuggers",
-    "Testing"
+    "Testing",
+    "Linters",
+    "Formatters"
   ],
   "keywords": [
     "Skink",
@@ -129,6 +132,16 @@
           "type": "string",
           "default": "",
           "description": "The SKINK_HOME directory containing lib/ and std/ folders."
+        },
+        "skink.lspPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the skink-lsp language server binary. If empty, the extension searches common locations and PATH."
+        },
+        "skink.enableLSP": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the skink-lsp language server for diagnostics, completion, hover, symbols, definition, and formatting."
         }
       }
     },
@@ -156,7 +169,7 @@
       "editor/title": [
         {
           "command": "skink.runTestFile",
-          "when": "resourceExtname == .skink",
+          "when": "editorLangId == 'Skink'",
           "group": "navigation@1"
         }
       ],
@@ -168,5 +181,8 @@
         }
       ]
     }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
   }
 }

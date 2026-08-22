@@ -29,7 +29,9 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const cp = __importStar(require("child_process"));
 const os = __importStar(require("os"));
+const node_1 = require("vscode-languageclient/node");
 // ─── Extension Entry Point ───────────────────────────────────────────────
+let languageClient;
 function activate(context) {
     // 1. Debug configuration provider
     const debugProvider = new SkinkDebugConfigurationProvider();
@@ -43,12 +45,119 @@ function activate(context) {
     // 4. File watchers for test discovery
     const testWatcher = vscode.workspace.createFileSystemWatcher('**/*_test.skink');
     context.subscriptions.push(testWatcher.onDidCreate((uri) => testController.addFile(uri)), testWatcher.onDidChange((uri) => testController.refreshFile(uri)), testWatcher.onDidDelete((uri) => testController.removeFile(uri)), testWatcher);
+    // 5. Start the skink-lsp language server (provides diagnostics, completion,
+    //    hover, symbols, definition, formatting, semantic tokens, etc.)
+    const enableLSP = vscode.workspace.getConfiguration('skink').get('enableLSP', true);
+    if (enableLSP) {
+        startLanguageServer(context);
+    }
 }
 exports.activate = activate;
-function deactivate() {
-    // Nothing to clean up
+async function deactivate() {
+    if (languageClient) {
+        await languageClient.stop();
+        languageClient = undefined;
+    }
 }
 exports.deactivate = deactivate;
+// ─── Language Server ─────────────────────────────────────────────────────
+async function startLanguageServer(context) {
+    const lspPath = findSkinkLSP();
+    if (!lspPath) {
+        vscode.window.showWarningMessage('Could not find the skink-lsp language server. Please configure "skink.lspPath" in your settings, or ensure skink-lsp is on your PATH.');
+        return;
+    }
+    // Pass SKINK_HOME to the LSP server so it can resolve stdlib modules.
+    const skinkHome = getSkinkHome();
+    const serverEnv = { ...process.env };
+    if (skinkHome) {
+        serverEnv.SKINK_HOME = skinkHome;
+    }
+    const executable = {
+        command: lspPath,
+        transport: node_1.TransportKind.stdio,
+        options: {
+            env: serverEnv,
+        },
+    };
+    const serverOptions = {
+        run: executable,
+        debug: executable,
+    };
+    const clientOptions = {
+        documentSelector: [{ scheme: 'file', language: 'Skink' }],
+        synchronize: {
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.skink'),
+        },
+    };
+    languageClient = new node_1.LanguageClient('skink-lsp', 'Skink Language Server', serverOptions, clientOptions);
+    // Start the client. This also activates all LSP-provided features
+    // (diagnostics, completion, hover, definition, symbols, formatting,
+    // semantic tokens, document highlights, rename, references).
+    context.subscriptions.push(languageClient);
+    try {
+        await languageClient.start();
+    }
+    catch (err) {
+        vscode.window.showErrorMessage(`Failed to start skink-lsp: ${err.message}`);
+        languageClient = undefined;
+    }
+}
+function findSkinkLSP() {
+    // 1. From VS Code settings
+    const settingsPath = vscode.workspace.getConfiguration('skink').get('lspPath');
+    if (settingsPath && settingsPath.trim()) {
+        if (fs.existsSync(settingsPath)) {
+            return settingsPath;
+        }
+    }
+    // 2. Repository relative layout (extension inside repo)
+    const repoPaths = [
+        path.resolve(__dirname, '../../skink-lsp/skink-lsp'),
+        path.resolve(__dirname, '../../skink-lsp/skink-lsp.exe'),
+        path.resolve(__dirname, '../../skink-lsp/bin/skink-lsp'),
+    ];
+    for (const p of repoPaths) {
+        if (fs.existsSync(p)) {
+            return p;
+        }
+    }
+    // 3. Workspace relative
+    if (vscode.workspace.workspaceFolders) {
+        for (const folder of vscode.workspace.workspaceFolders) {
+            const wsPaths = [
+                path.resolve(folder.uri.fsPath, 'skink-lsp/skink-lsp'),
+                path.resolve(folder.uri.fsPath, 'skink-lsp/bin/skink-lsp'),
+            ];
+            for (const p of wsPaths) {
+                if (fs.existsSync(p)) {
+                    return p;
+                }
+            }
+        }
+    }
+    // 4. PATH lookup
+    const exeName = os.platform() === 'win32' ? 'skink-lsp.exe' : 'skink-lsp';
+    const envPaths = (process.env.PATH || '').split(path.delimiter);
+    for (const p of envPaths) {
+        const fullPath = path.join(p, exeName);
+        if (fs.existsSync(fullPath)) {
+            return fullPath;
+        }
+    }
+    // 5. Common install locations
+    const installPaths = [
+        '/usr/local/bin/skink-lsp',
+        '/usr/bin/skink-lsp',
+        path.join(os.homedir(), '.local/bin/skink-lsp'),
+    ];
+    for (const p of installPaths) {
+        if (fs.existsSync(p)) {
+            return p;
+        }
+    }
+    return undefined;
+}
 // ─── Compiler Discovery ──────────────────────────────────────────────────
 async function findSkinkCompiler(configCompilerPath, folder) {
     // 1. From explicit configuration
@@ -66,14 +175,8 @@ async function findSkinkCompiler(configCompilerPath, folder) {
     }
     // 3. Repository relative layout (extension inside repo)
     const repoPaths = [
-        path.resolve(__dirname, '../../skink/compiler/skink'),
-        path.resolve(__dirname, '../../skink/compiler/skink.exe'),
-        path.resolve(__dirname, '../../compiler/skink'),
-        path.resolve(__dirname, '../../compiler/skink.exe'),
-        path.resolve(__dirname, '../../skink/compiler/cmd/skink/skink'),
-        path.resolve(__dirname, '../../skink/compiler/cmd/skink/skink.exe'),
-        path.resolve(__dirname, '../../compiler/cmd/skink/skink'),
-        path.resolve(__dirname, '../../compiler/cmd/skink/skink.exe'),
+        path.resolve(__dirname, '../../skink-pure/skink'),
+        path.resolve(__dirname, '../../skink-pure/skink.exe'),
         path.resolve(__dirname, '../../skink'),
         path.resolve(__dirname, '../../skink.exe'),
     ];
@@ -85,8 +188,7 @@ async function findSkinkCompiler(configCompilerPath, folder) {
     // 4. Workspace relative
     if (folder) {
         const wsPaths = [
-            path.resolve(folder.uri.fsPath, 'skink/compiler/cmd/skink/skink'),
-            path.resolve(folder.uri.fsPath, 'compiler/cmd/skink/skink'),
+            path.resolve(folder.uri.fsPath, 'skink-pure/skink'),
             path.resolve(folder.uri.fsPath, 'skink'),
         ];
         for (const p of wsPaths) {
@@ -122,19 +224,29 @@ function getSkinkHome(configSkinkHome, folder) {
     }
     // 4. Repo relative
     const repoHomes = [
-        path.resolve(__dirname, '../../skink/compiler'),
-        path.resolve(__dirname, '../../compiler'),
+        path.resolve(__dirname, '../../skink-pure/std'),
+        path.resolve(__dirname, '../../skink-pure'),
     ];
     for (const h of repoHomes) {
-        if (fs.existsSync(path.join(h, 'lib', 'testing.skink'))) {
+        if (fs.existsSync(path.join(h, 'json.skink'))) {
             return h;
         }
     }
     // 5. Workspace relative
     if (folder) {
-        const wsHome = path.resolve(folder.uri.fsPath, 'skink/compiler');
-        if (fs.existsSync(path.join(wsHome, 'lib', 'testing.skink'))) {
+        const wsHome = path.resolve(folder.uri.fsPath, 'skink-pure/std');
+        if (fs.existsSync(path.join(wsHome, 'json.skink'))) {
             return wsHome;
+        }
+    }
+    // 6. Common install locations
+    const installHomes = [
+        '/usr/local/lib/skink/std',
+        '/usr/local/lib/skink',
+    ];
+    for (const h of installHomes) {
+        if (fs.existsSync(path.join(h, 'json.skink'))) {
+            return h;
         }
     }
     return undefined;

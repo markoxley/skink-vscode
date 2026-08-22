@@ -88,20 +88,6 @@
             {
               "name": "constant.character.escape.skink",
               "match": "\\\\(\\\\|\"|n|r|t|0|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})"
-            },
-            {
-              "name": "meta.interpolation.skink",
-              "begin": "\\{",
-              "end": "\\}",
-              "beginCaptures": {
-                "0": { "name": "punctuation.definition.interpolation.begin.skink" }
-              },
-              "endCaptures": {
-                "0": { "name": "punctuation.definition.interpolation.end.skink" }
-              },
-              "patterns": [
-                { "include": "$self" }
-              ]
             }
           ]
         },
@@ -154,7 +140,7 @@
         },
         {
           "name": "keyword.other.skink",
-          "match": "\\b(fn|pub|const|var|struct|enum|service|module|import|sizeof|alignof|min|max|template)\\b"
+          "match": "\\b(fn|pub|const|var|struct|enum|service|module|import|sizeof|alignof|min|max|template|impl)\\b"
         },
         {
           "name": "keyword.operator.logical.skink",

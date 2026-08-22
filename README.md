@@ -1,8 +1,20 @@
 # Skink Language Support for VS Code
 
-Provides syntax highlighting, snippets, and basic language configuration for the [Skink](https://github.com/markoxley/skink-lang) programming language.
+Provides syntax highlighting, snippets, language server integration, debugging, and testing for the [Skink](https://github.com/markoxley/skink-lang) programming language.
 
 ## Features
+
+- **Language Server (LSP)** — Full IDE features via `skink-lsp` (written in Skink itself):
+  - **Diagnostics** — Real-time error checking as you type
+  - **Completion** — Keywords, snippets, identifiers, and built-in types/functions
+  - **Hover** — Type information and function signatures on hover
+  - **Go to Definition** — Jump to symbol definitions
+  - **Document Symbols** — Outline view of functions, structs, enums, and constants
+  - **Formatting** — Code formatting with consistent indentation
+  - **Semantic Tokens** — Enhanced syntax highlighting based on semantic analysis
+  - **Document Highlights** — Highlight all occurrences of a symbol
+  - **References** — Find all references to a symbol
+  - **Rename** — Rename symbols across the document
 
 - **Syntax Highlighting** — Full TextMate grammar covering:
   - Keywords (`fn`, `pub`, `struct`, `enum`, `if`, `for`, `match`, `defer`, `unsafe`, `async`, `await`, `spawn`, `select`, `comptime`, `ruleset`, `service`, `extern`, etc.)
@@ -54,23 +66,33 @@ Provides syntax highlighting, snippets, and basic language configuration for the
   3. Workspace-relative paths (`skink/compiler/cmd/skink/skink`)
   4. Extension-relative paths (when running from the repo)
 
+- **skink-lsp language server** — The extension looks for the `skink-lsp` binary in:
+  1. `skink.lspPath` setting
+  2. Workspace-relative paths (`skink-lsp/skink-lsp`)
+  3. Extension-relative paths (when running from the repo)
+  4. `PATH` environment variable
+  5. Common install locations (`/usr/local/bin/skink-lsp`, `~/.local/bin/skink-lsp`)
+
 - **Native debugger** (for debugging) — Install one of:
   - [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb) (recommended)
   - [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools)
 
 ## Configuration
 
-| Setting              | Description                                                        |
-| -------------------- | ------------------------------------------------------------------ |
-| `skink.compilerPath` | Absolute path to the `skink` compiler executable                   |
-| `skink.skinkHome`    | Directory containing `lib/` and `std/` (sets `SKINK_HOME` env var) |
+| Setting              | Description                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `skink.compilerPath` | Absolute path to the `skink` compiler executable                                      |
+| `skink.skinkHome`    | Directory containing `lib/` and `std/` (sets `SKINK_HOME` env var)                   |
+| `skink.lspPath`      | Absolute path to the `skink-lsp` language server binary                               |
+| `skink.enableLSP`    | Enable/disable the language server (default: `true`)                                 |
 
 Example `settings.json`:
 
 ```json
 {
   "skink.compilerPath": "/home/user/skink-lang/skink/compiler/cmd/skink/skink",
-  "skink.skinkHome": "/home/user/skink-lang/skink/compiler"
+  "skink.skinkHome": "/home/user/skink-lang/skink/compiler",
+  "skink.lspPath": "/home/user/skink-lsp/skink-lsp"
 }
 ```
 
