@@ -351,27 +351,39 @@ class SkinkDebugConfigurationProvider implements vscode.DebugConfigurationProvid
 		const codeLldbExtension = vscode.extensions.getExtension('vadimcn.vscode-lldb');
 		const cpptoolsExtension = vscode.extensions.getExtension('ms-vscode.cpptools');
 		const args = config.args || [];
+		const cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
+		const name = config.name || 'Launch Skink File';
+
+		let nativeConfig: vscode.DebugConfiguration;
 
 		if (codeLldbExtension) {
 			output.appendLine('[Skink Build] Target native debugger: CodeLLDB (type: "lldb")');
-			config.type = 'lldb';
-			config.request = 'launch';
-			config.program = outBinaryPath;
-			config.args = args;
-			config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
-			// CodeLLDB specific: enable source mapping if needed
-			config.sourceMap = config.sourceMap || {};
+			nativeConfig = {
+				...config,
+				type: 'lldb',
+				request: 'launch',
+				name,
+				program: outBinaryPath,
+				args,
+				cwd,
+				sourceMap: config.sourceMap || {},
+			};
 		} else if (cpptoolsExtension) {
 			output.appendLine('[Skink Build] Target native debugger: C/C++ Extension (type: "cppdbg")');
-			config.type = 'cppdbg';
-			config.request = 'launch';
-			config.program = outBinaryPath;
-			config.args = args;
-			config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
-			config.MIMode = os.platform() === 'darwin' ? 'lldb' : 'gdb';
-			config.environment = config.environment || [];
-			config.externalConsole = false;
+			nativeConfig = {
+				...config,
+				type: 'cppdbg',
+				request: 'launch',
+				name,
+				program: outBinaryPath,
+				args,
+				cwd,
+				MIMode: os.platform() === 'darwin' ? 'lldb' : 'gdb',
+				environment: config.environment || [],
+				externalConsole: false,
+			};
 		} else {
+			output.appendLine('[Skink Build] No native debugger extension installed; aborting debug session.');
 			vscode.window.showWarningMessage(
 				'To debug Skink code, install the "CodeLLDB" or "C/C++" (ms-vscode.cpptools) extensions for native debugging.',
 				'Install CodeLLDB'
@@ -380,14 +392,30 @@ class SkinkDebugConfigurationProvider implements vscode.DebugConfigurationProvid
 					vscode.commands.executeCommand('workbench.extensions.installExtension', 'vadimcn.vscode-lldb');
 				}
 			});
-			config.type = 'lldb';
-			config.request = 'launch';
-			config.program = outBinaryPath;
-			config.args = args;
-			config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
+			return undefined;
 		}
 
-		return config;
+		// A session keeps the debug type it was started with, so the compiled
+		// binary is handed to the native debugger as a separate session.
+		delete nativeConfig.compilerPath;
+		delete nativeConfig.skinkHome;
+
+		vscode.debug.startDebugging(folder, nativeConfig, { noDebug: config.noDebug === true }).then(
+			(started) => {
+				if (!started) {
+					output.appendLine(`[Skink Build Error] Failed to start the "${nativeConfig.type}" debug session.`);
+					vscode.window.showErrorMessage(
+						`Failed to start the native debugger ("${nativeConfig.type}"). See the Skink Build output for details.`
+					);
+				}
+			},
+			(err: any) => {
+				output.appendLine(`[Skink Build Error] ${err?.message ?? err}`);
+				vscode.window.showErrorMessage(`Failed to start the native debugger: ${err?.message ?? err}`);
+			}
+		);
+
+		return undefined;
 	}
 }
 
