@@ -10,11 +10,20 @@ Provides syntax highlighting, snippets, language server integration, debugging, 
   - **Hover** — Type information and function signatures on hover
   - **Go to Definition** — Jump to symbol definitions
   - **Document Symbols** — Outline view of functions, structs, enums, and constants
-  - **Formatting** — Code formatting with consistent indentation
   - **Semantic Tokens** — Enhanced syntax highlighting based on semantic analysis
   - **Document Highlights** — Highlight all occurrences of a symbol
   - **References** — Find all references to a symbol
   - **Rename** — Rename symbols across the document
+
+- **Formatting** — The extension registers itself as a VS Code formatter for
+  `.skink` files, so it works just like any other formatter:
+  - Use **Format Document** (`Shift+Alt+F`) or **Format Selection** (`Ctrl+K Ctrl+F`)
+  - Enable **Format on Save** with `"editor.formatOnSave": true`
+  - Set it as the default formatter with `"editor.defaultFormatter": "skink-lang.skink-lang"`
+  - Pick it from the **Format Document With...** context menu
+  - Runs in the extension host — no language server required
+  - Consistent 4-space indentation, trailing-whitespace trimming, and
+    bracket-based indent adjustment (mirrors `skink-lsp`'s formatting)
 
 - **Syntax Highlighting** — Full TextMate grammar covering:
   - Keywords (`fn`, `pub`, `struct`, `enum`, `if`, `for`, `match`, `defer`, `unsafe`, `async`, `await`, `spawn`, `select`, `comptime`, `ruleset`, `service`, `extern`, etc.)
@@ -79,12 +88,17 @@ Provides syntax highlighting, snippets, language server integration, debugging, 
 
 ## Configuration
 
-| Setting              | Description                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| `skink.compilerPath` | Absolute path to the `skink` compiler executable                                      |
-| `skink.skinkHome`    | Directory containing `lib/` and `std/` (sets `SKINK_HOME` env var)                   |
-| `skink.lspPath`      | Absolute path to the `skink-lsp` language server binary                               |
-| `skink.enableLSP`    | Enable/disable the language server (default: `true`)                                 |
+| Setting                          | Description                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| `skink.compilerPath`             | Absolute path to the `skink` compiler executable                                      |
+| `skink.skinkHome`                | Directory containing `lib/` and `std/` (sets `SKINK_HOME` env var)                   |
+| `skink.lspPath`                  | Absolute path to the `skink-lsp` language server binary                               |
+| `skink.enableLSP`                | Enable/disable the language server (default: `true`)                                 |
+| `skink.format.enable`            | Register the extension as a formatter for `.skink` files (default: `true`)           |
+| `skink.format.indentSize`        | Spaces per indent level (defaults to the editor's `tabSize`)                         |
+| `skink.format.insertSpaces`      | Indent with spaces instead of tabs (defaults to the editor's `insertSpaces`)         |
+| `skink.format.trimTrailingWhitespace` | Remove trailing whitespace from each line (default: `true`)                     |
+| `skink.format.ensureFinalNewline`| Ensure the file ends with a trailing newline (default: `true`)                       |
 
 Example `settings.json`:
 
@@ -92,7 +106,10 @@ Example `settings.json`:
 {
   "skink.compilerPath": "/home/user/skink-lang/skink/compiler/cmd/skink/skink",
   "skink.skinkHome": "/home/user/skink-lang/skink/compiler",
-  "skink.lspPath": "/home/user/skink-lsp/skink-lsp"
+  "skink.lspPath": "/home/user/skink-lsp/skink-lsp",
+  "editor.defaultFormatter": "skink-lang.skink-lang",
+  "editor.formatOnSave": true,
+  "skink.format.indentSize": 4
 }
 ```
 

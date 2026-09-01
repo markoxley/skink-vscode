@@ -2,7 +2,7 @@
   "name": "skink-lang",
   "displayName": "Skink Language Support",
   "description": "Syntax highlighting, snippets, testing, and debugging for the Skink programming language.",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "publisher": "skink-lang",
   "icon": "icon.png",
   "license": "MIT",
@@ -68,6 +68,11 @@
       {
         "language": "Skink",
         "path": "./snippets/Skink.json"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "Skink"
       }
     ],
     "debuggers": [
@@ -142,6 +147,30 @@
           "type": "boolean",
           "default": true,
           "description": "Enable the skink-lsp language server for diagnostics, completion, hover, symbols, definition, and formatting."
+        },
+        "skink.format.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Register the Skink extension as a document formatter for .skink files. When enabled, \"Format Document\", \"Format Selection\", and \"Format on Save\" all work, and the extension can be set as the default formatter (\"skink-lang\")."
+        },
+        "skink.format.indentSize": {
+          "type": "number",
+          "minimum": 1,
+          "description": "Number of spaces per indentation level. Ignored when spaces are disabled (\"editor.insertSpaces: false\"). Defaults to the editor's tab size."
+        },
+        "skink.format.insertSpaces": {
+          "type": "boolean",
+          "description": "Indent with spaces instead of tabs. Defaults to the editor's \"insertSpaces\" setting for Skink files."
+        },
+        "skink.format.trimTrailingWhitespace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remove trailing whitespace from every line when formatting."
+        },
+        "skink.format.ensureFinalNewline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ensure the formatted document ends with a single trailing newline."
         }
       }
     },

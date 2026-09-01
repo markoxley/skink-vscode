@@ -10,6 +10,7 @@ import {
 	TransportKind,
 	Executable,
 } from 'vscode-languageclient/node';
+import { SkinkFormattingEditProvider } from './formatter';
 
 // ─── Extension Entry Point ───────────────────────────────────────────────
 
@@ -17,6 +18,12 @@ let languageClient: LanguageClient | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
 	// 1. Debug configuration provider
+	//    The "Skink" debugger type is a placeholder: the provider compiles the
+	//    .skink file, then launches a *new* debug session using a native
+	//    debugger (lldb, lldb-dap, or cppdbg) via vscode.debug.startDebugging.
+	//    It returns undefined so VS Code does not try to start a (non-existent)
+	//    "Skink" debug adapter. No DebugAdapterDescriptorFactory is registered
+	//    because the "Skink" type never runs a real debug adapter.
 	const debugProvider = new SkinkDebugConfigurationProvider();
 	context.subscriptions.push(
 		vscode.debug.registerDebugConfigurationProvider('Skink', debugProvider)
@@ -43,9 +50,38 @@ export function activate(context: vscode.ExtensionContext) {
 		testWatcher
 	);
 
-	// 5. Start the skink-lsp language server (provides diagnostics, completion,
-	//    hover, symbols, definition, formatting, semantic tokens, etc.)
+	// 5. Register the Skink formatter so it behaves like any other VS Code
+	//    formatter (appears in "Format Document With...", can be set as the
+	//    default formatter, works with "Format on Save"). This runs in the
+	//    extension host and does not require the language server.
+	//
+	//    IMPORTANT: When the LSP is enabled, skink-lsp already advertises
+	//    documentFormattingProvider:true and the vscode-languageclient library
+	//    auto-registers a formatter for it. If we ALSO register our own
+	//    extension-host formatter here, VS Code sees TWO formatters for Skink
+	//    files. With multiple formatters and no default formatter set, VS Code
+	//    hides the "Format Document" entry from the editor context menu (right-
+	//    click). To keep a single formatter (so the context menu works), we
+	//    only register the extension-host formatter when the LSP is disabled.
+	//    When the LSP is enabled, the LSP's formatter is the sole provider.
 	const enableLSP = vscode.workspace.getConfiguration('skink').get<boolean>('enableLSP', true);
+	const formatEnabled = vscode.workspace.getConfiguration('skink.format').get<boolean>('enable', true);
+	if (formatEnabled && !enableLSP) {
+		const formatter = new SkinkFormattingEditProvider();
+		context.subscriptions.push(
+			vscode.languages.registerDocumentFormattingEditProvider(
+				[{ scheme: 'file', language: 'Skink' }, { scheme: 'file', language: 'skink' }],
+				formatter,
+			),
+			vscode.languages.registerDocumentRangeFormattingEditProvider(
+				[{ scheme: 'file', language: 'Skink' }, { scheme: 'file', language: 'skink' }],
+				formatter,
+			),
+		);
+	}
+
+	// 6. Start the skink-lsp language server (provides diagnostics, completion,
+	//    hover, symbols, definition, formatting, semantic tokens, etc.)
 	if (enableLSP) {
 		startLanguageServer(context);
 	}
@@ -195,8 +231,10 @@ async function findSkinkCompiler(configCompilerPath?: string, folder?: vscode.Wo
 		}
 	}
 
-	// 3. Repository relative layout (extension inside repo)
+	// 2. Repository relative layout (extension inside repo)
 	const repoPaths = [
+		path.resolve(__dirname, '../../skink/skink'),
+		path.resolve(__dirname, '../../skink/skink.exe'),
 		path.resolve(__dirname, '../../skink-pure/skink'),
 		path.resolve(__dirname, '../../skink-pure/skink.exe'),
 		path.resolve(__dirname, '../../skink'),
@@ -208,16 +246,29 @@ async function findSkinkCompiler(configCompilerPath?: string, folder?: vscode.Wo
 		}
 	}
 
-	// 4. Workspace relative
+	// 3. Workspace relative
 	if (folder) {
 		const wsPaths = [
-			path.resolve(folder.uri.fsPath, 'skink-pure/skink'),
+			path.resolve(folder.uri.fsPath, 'skink/skink'),
 			path.resolve(folder.uri.fsPath, 'skink'),
+			path.resolve(folder.uri.fsPath, 'skink-pure/skink'),
 		];
 		for (const p of wsPaths) {
 			if (fs.existsSync(p)) {
 				return p;
 			}
+		}
+	}
+
+	// 4. Common install locations
+	const installPaths = [
+		'/usr/local/bin/skink',
+		'/usr/bin/skink',
+		path.join(os.homedir(), '.local/bin/skink'),
+	];
+	for (const p of installPaths) {
+		if (fs.existsSync(p)) {
+			return p;
 		}
 	}
 
@@ -250,29 +301,43 @@ function getSkinkHome(configSkinkHome?: string, folder?: vscode.WorkspaceFolder)
 	}
 	// 4. Repo relative
 	const repoHomes = [
+		path.resolve(__dirname, '../../skink/std'),
+		path.resolve(__dirname, '../../skink'),
 		path.resolve(__dirname, '../../skink-pure/std'),
 		path.resolve(__dirname, '../../skink-pure'),
 	];
 	for (const h of repoHomes) {
-		if (fs.existsSync(path.join(h, 'json.skink'))) {
-			return h;
+		if (fs.existsSync(path.join(h, 'json.skink')) || fs.existsSync(path.join(h, 'std/json.skink'))) {
+			return fs.existsSync(path.join(h, 'json.skink')) ? h : path.join(h, 'std');
 		}
 	}
 	// 5. Workspace relative
 	if (folder) {
-		const wsHome = path.resolve(folder.uri.fsPath, 'skink-pure/std');
-		if (fs.existsSync(path.join(wsHome, 'json.skink'))) {
-			return wsHome;
+		const wsHomes = [
+			path.resolve(folder.uri.fsPath, 'std'),
+			path.resolve(folder.uri.fsPath, 'skink/std'),
+			path.resolve(folder.uri.fsPath, 'skink-pure/std'),
+			folder.uri.fsPath,
+		];
+		for (const wsHome of wsHomes) {
+			if (fs.existsSync(path.join(wsHome, 'json.skink'))) {
+				return wsHome;
+			}
+			if (fs.existsSync(path.join(wsHome, 'std/json.skink'))) {
+				return wsHome;
+			}
 		}
 	}
 	// 6. Common install locations
 	const installHomes = [
 		'/usr/local/lib/skink/std',
 		'/usr/local/lib/skink',
+		path.join(os.homedir(), '.local/lib/skink/std'),
+		path.join(os.homedir(), '.local/lib/skink'),
 	];
 	for (const h of installHomes) {
-		if (fs.existsSync(path.join(h, 'json.skink'))) {
-			return h;
+		if (fs.existsSync(path.join(h, 'json.skink')) || fs.existsSync(path.join(h, 'std/json.skink'))) {
+			return fs.existsSync(path.join(h, 'json.skink')) ? h : path.join(h, 'std');
 		}
 	}
 	return undefined;
@@ -347,48 +412,83 @@ class SkinkDebugConfigurationProvider implements vscode.DebugConfigurationProvid
 
 		output.appendLine('[Skink Build] Compilation successful! Invoking native debugger...');
 
-		// Check which native debugger extensions are installed
-		const codeLldbExtension = vscode.extensions.getExtension('vadimcn.vscode-lldb');
-		const cpptoolsExtension = vscode.extensions.getExtension('ms-vscode.cpptools');
+		const availableDebugger = findAvailableDebugger();
+		const targetType = availableDebugger ? availableDebugger.type : 'lldb';
+		const targetLabel = availableDebugger ? availableDebugger.label : 'CodeLLDB (default)';
 		const args = config.args || [];
 
-		if (codeLldbExtension) {
-			output.appendLine('[Skink Build] Target native debugger: CodeLLDB (type: "lldb")');
-			config.type = 'lldb';
-			config.request = 'launch';
-			config.program = outBinaryPath;
-			config.args = args;
-			config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
-			// CodeLLDB specific: enable source mapping if needed
-			config.sourceMap = config.sourceMap || {};
-		} else if (cpptoolsExtension) {
-			output.appendLine('[Skink Build] Target native debugger: C/C++ Extension (type: "cppdbg")');
-			config.type = 'cppdbg';
-			config.request = 'launch';
-			config.program = outBinaryPath;
-			config.args = args;
-			config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
-			config.MIMode = os.platform() === 'darwin' ? 'lldb' : 'gdb';
-			config.environment = config.environment || [];
-			config.externalConsole = false;
-		} else {
+		output.appendLine(`[Skink Build] Target native debugger: ${targetLabel} (type: "${targetType}")`);
+
+		if (!availableDebugger) {
 			vscode.window.showWarningMessage(
-				'To debug Skink code, install the "CodeLLDB" or "C/C++" (ms-vscode.cpptools) extensions for native debugging.',
+				'To debug Skink code, install the "CodeLLDB" or "C/C++" extensions for native debugging.',
 				'Install CodeLLDB'
-			).then(selection => {
+			).then((selection) => {
 				if (selection === 'Install CodeLLDB') {
 					vscode.commands.executeCommand('workbench.extensions.installExtension', 'vadimcn.vscode-lldb');
 				}
 			});
-			config.type = 'lldb';
-			config.request = 'launch';
-			config.program = outBinaryPath;
-			config.args = args;
-			config.cwd = config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir);
 		}
 
-		return config;
+		// Build a fresh native debug config and launch it as a new debug session.
+		// We must NOT mutate config.type in-place and return it — VS Code does not
+		// re-dispatch to a different debugger type from within a
+		// resolveDebugConfigurationWithSubstitutedVariables handler, so the
+		// mutated type would result in "no debug adapter registered for type
+		// 'Skink'" (or the mutated type). Instead, start a brand-new session with
+		// the native debugger type and return undefined to cancel this "Skink"
+		// resolution.
+		const nativeConfig: vscode.DebugConfiguration = {
+			type: targetType,
+			request: 'launch',
+			name: config.name || 'Skink (native)',
+			program: outBinaryPath,
+			args,
+			cwd: config.cwd || (folder ? folder.uri.fsPath : parsedPath.dir),
+			stopOnEntry: config.stopOnEntry ?? false,
+		};
+
+		if (targetType === 'lldb') {
+			nativeConfig.sourceMap = config.sourceMap || {};
+		} else if (targetType === 'lldb-dap') {
+			nativeConfig.sourceMap = config.sourceMap || {};
+		} else if (targetType === 'cppdbg') {
+			nativeConfig.MIMode = os.platform() === 'darwin' ? 'lldb' : 'gdb';
+			nativeConfig.environment = config.environment || [];
+			nativeConfig.externalConsole = false;
+		}
+
+		// Launch the native debug session. Return undefined so VS Code does not
+		// try to start a (non-existent) "Skink" debug adapter.
+		vscode.debug.startDebugging(folder, nativeConfig).then(
+			(started) => {
+				if (!started) {
+					output.appendLine(`[Skink Build] Failed to start ${targetLabel} debug session.`);
+				}
+			},
+			(err: any) => {
+				output.appendLine(`[Skink Build] Error starting native debugger: ${err?.message || err}`);
+			},
+		);
+
+		return undefined;
 	}
+}
+
+function findAvailableDebugger(): { type: string; label: string } | undefined {
+	if (vscode.extensions.getExtension('vadimcn.vscode-lldb')) {
+		return { type: 'lldb', label: 'CodeLLDB' };
+	}
+	if (vscode.extensions.getExtension('llvm-vs-code-extensions.lldb-dap')) {
+		return { type: 'lldb-dap', label: 'LLDB DAP' };
+	}
+	if (
+		vscode.extensions.getExtension('ms-vscode.cpptools') ||
+		vscode.extensions.getExtension('codeium.windsurf-cpptools')
+	) {
+		return { type: 'cppdbg', label: 'C/C++ Debugger (GDB/LLDB)' };
+	}
+	return undefined;
 }
 
 // ─── Compilation Helper ──────────────────────────────────────────────────
@@ -406,7 +506,8 @@ function compileSkink(
 			return reject(new Error('Compilation cancelled.'));
 		}
 
-		const args = ['-o', outBinaryPath, programPath];
+		// Compile with output path and debug info flag (-g) if supported
+		const args = ['-g', '-o', outBinaryPath, programPath];
 		const env = { ...process.env };
 		if (skinkHome) {
 			env.SKINK_HOME = skinkHome;
@@ -609,7 +710,9 @@ class SkinkTestController implements vscode.Disposable {
 			env.SKINK_HOME = skinkHome;
 		}
 
-		const child = cp.spawn(compilerPath, ['test', path.basename(fileItem.uri.fsPath, '_test.skink')], {
+		// Run tests using compiler flag '-t <file>' which delegates to the test harness.
+		const testFilePath = fileItem.uri.fsPath;
+		const child = cp.spawn(compilerPath, ['-t', testFilePath], {
 			cwd,
 			env,
 		});
