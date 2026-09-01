@@ -2,7 +2,7 @@
   "name": "skink-lang",
   "displayName": "Skink Language Support",
   "description": "Syntax highlighting, snippets, testing, and debugging for the Skink programming language.",
-  "version": "0.5.1",
+  "version": "0.5.7",
   "publisher": "skink-lang",
   "icon": "icon.png",
   "license": "MIT",
@@ -68,6 +68,11 @@
       {
         "language": "Skink",
         "path": "./snippets/Skink.json"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "Skink"
       }
     ],
     "debuggers": [
