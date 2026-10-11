@@ -2,7 +2,7 @@
   "name": "skink-lang",
   "displayName": "Skink Language Support",
   "description": "Syntax highlighting, snippets, testing, and debugging for the Skink programming language.",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "publisher": "skink-lang",
   "icon": "icon.png",
   "license": "MIT",
@@ -35,12 +35,15 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p .",
-    "watch": "tsc -watch -p ."
+    "watch": "tsc -watch -p .",
+    "test": "tsc -p . && mocha out/**/*.test.js"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^16.x",
     "@types/vscode": "^1.74.0",
     "@vscode/vsce": "^3.9.2",
+    "mocha": "^12.0.1",
     "typescript": "^4.9.5"
   },
   "contributes": {
@@ -147,6 +150,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable the skink-lsp language server for diagnostics, completion, hover, symbols, definition, and formatting."
+        },
+        "skink.enableDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable fallback diagnostics via `skink -check` when the LSP is unavailable or disabled. Highlights syntax and type errors in real-time without requiring skink-lsp."
         },
         "skink.format.enable": {
           "type": "boolean",

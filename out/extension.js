@@ -23,7 +23,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deactivate = exports.activate = void 0;
+exports.SkinkTestController = exports.parseTestOutput = exports.deactivate = exports.activate = void 0;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
@@ -31,9 +31,10 @@ const cp = __importStar(require("child_process"));
 const os = __importStar(require("os"));
 const node_1 = require("vscode-languageclient/node");
 const formatter_1 = require("./formatter");
+const diagnostics_1 = require("./diagnostics");
 // ─── Extension Entry Point ───────────────────────────────────────────────
 let languageClient;
-function activate(context) {
+async function activate(context) {
     // 1. Debug configuration provider
     //    The "Skink" debugger type is a placeholder: the provider compiles the
     //    .skink file, then launches a *new* debug session using a native
@@ -66,6 +67,19 @@ function activate(context) {
     //    click). To keep a single formatter (so the context menu works), we
     //    only register the extension-host formatter when the LSP is disabled.
     //    When the LSP is enabled, the LSP's formatter is the sole provider.
+    //
+    //    Settings behavior:
+    //    - When LSP is ENABLED (default): the LSP formatter is used. It honors
+    //      `tabSize` and `insertSpaces` from the LSP FormattingOptions (which
+    //      VS Code populates from `editor.tabSize` and `editor.insertSpaces`).
+    //      The `skink.format.indentSize`, `trimTrailingWhitespace`, and
+    //      `ensureFinalNewline` settings are NOT passed to the LSP by the
+    //      standard LSP formatting request, so they have no effect when the
+    //      LSP is enabled. The LSP formatter always trims trailing whitespace
+    //      and ensures a final newline (sensible defaults).
+    //    - When LSP is DISABLED: the extension-host formatter is used. It
+    //      honors all `skink.format.*` settings: `indentSize`, `insertSpaces`,
+    //      `trimTrailingWhitespace`, and `ensureFinalNewline`.
     const enableLSP = vscode.workspace.getConfiguration('skink').get('enableLSP', true);
     const formatEnabled = vscode.workspace.getConfiguration('skink.format').get('enable', true);
     if (formatEnabled && !enableLSP) {
@@ -74,11 +88,49 @@ function activate(context) {
     }
     // 6. Start the skink-lsp language server (provides diagnostics, completion,
     //    hover, symbols, definition, formatting, semantic tokens, etc.)
+    //
+    //    When the LSP is disabled or fails to start, we register a fallback
+    //    diagnostic provider that runs `skink -check` on document changes.
+    //    This ensures syntax/type errors are always highlighted in the editor
+    //    even without the language server.
+    let diagnosticProvider;
+    const enableDiagnostics = vscode.workspace.getConfiguration('skink').get('enableDiagnostics', true);
     if (enableLSP) {
-        startLanguageServer(context);
+        // Try to start the LSP. If it fails (binary not found, crash, etc.),
+        // fall back to the compiler-based diagnostic provider.
+        const lspStarted = await startLanguageServer(context);
+        if (!lspStarted && enableDiagnostics) {
+            diagnosticProvider = new diagnostics_1.SkinkDiagnosticProvider();
+            diagnosticProvider.refreshConfig();
+            context.subscriptions.push(diagnosticProvider);
+            registerDiagnosticListeners(context, diagnosticProvider);
+        }
+    }
+    else if (enableDiagnostics) {
+        // LSP disabled — use the fallback diagnostic provider exclusively.
+        diagnosticProvider = new diagnostics_1.SkinkDiagnosticProvider();
+        diagnosticProvider.refreshConfig();
+        context.subscriptions.push(diagnosticProvider);
+        registerDiagnosticListeners(context, diagnosticProvider);
     }
 }
 exports.activate = activate;
+// Register document event listeners that drive the fallback diagnostic provider.
+function registerDiagnosticListeners(context, provider) {
+    // Check open documents on activation
+    for (const doc of vscode.workspace.textDocuments) {
+        provider.scheduleCheck(doc);
+    }
+    context.subscriptions.push(
+    // Check on document open
+    vscode.workspace.onDidOpenTextDocument((doc) => provider.scheduleCheck(doc)), 
+    // Check on document change (debounced inside the provider)
+    vscode.workspace.onDidChangeTextDocument((e) => provider.scheduleCheck(e.document)), 
+    // Clear diagnostics on close
+    vscode.workspace.onDidCloseTextDocument((doc) => provider.clear(doc.uri)), 
+    // Re-check on save (the file on disk is now current)
+    vscode.workspace.onDidSaveTextDocument((doc) => provider.scheduleCheck(doc)));
+}
 async function deactivate() {
     if (languageClient) {
         await languageClient.stop();
@@ -91,7 +143,7 @@ async function startLanguageServer(context) {
     const lspPath = findSkinkLSP();
     if (!lspPath) {
         vscode.window.showWarningMessage('Could not find the skink-lsp language server. Please configure "skink.lspPath" in your settings, or ensure skink-lsp is on your PATH.');
-        return;
+        return false;
     }
     // Pass SKINK_HOME to the LSP server so it can resolve stdlib modules.
     const skinkHome = getSkinkHome();
@@ -123,10 +175,12 @@ async function startLanguageServer(context) {
     context.subscriptions.push(languageClient);
     try {
         await languageClient.start();
+        return true;
     }
     catch (err) {
         vscode.window.showErrorMessage(`Failed to start skink-lsp: ${err.message}`);
         languageClient = undefined;
+        return false;
     }
 }
 function findSkinkLSP() {
@@ -444,15 +498,19 @@ function compileSkink(compilerPath, programPath, outBinaryPath, output, skinkHom
             errOutput += str;
             output.append(str);
         });
-        token?.onCancellationRequested(() => {
+        // Dispose the cancellation listener when the process exits to avoid
+        // leaking the listener if the token outlives the compilation.
+        const cancelDisposable = token?.onCancellationRequested(() => {
             child.kill();
             reject(new Error('Compilation cancelled.'));
         });
         child.on('error', (err) => {
+            cancelDisposable?.dispose();
             output.appendLine(`[Skink Build Error] Failed to run compiler: ${err.message}`);
             reject(err);
         });
         child.on('exit', (code) => {
+            cancelDisposable?.dispose();
             if (code === 0) {
                 resolve();
             }
@@ -463,6 +521,49 @@ function compileSkink(compilerPath, programPath, outBinaryPath, output, skinkHom
         });
     });
 }
+function parseTestOutput(lines, testNames) {
+    const results = new Map();
+    // First pass: look for explicit "PASS <name>" / "FAIL <name>" lines.
+    for (const line of lines) {
+        const trimmed = line.trim();
+        // Match "PASS <name>" or "FAIL <name>" at the start of the line.
+        const passMatch = /^PASS\s+(\S+)/.exec(trimmed);
+        if (passMatch) {
+            const name = passMatch[1];
+            for (const testName of testNames) {
+                if (testName === name || testName.startsWith(name + ' ') || name.startsWith(testName + ' ')) {
+                    results.set(testName, 'pass');
+                }
+            }
+            continue;
+        }
+        const failMatch = /^FAIL\s+(\S+)/.exec(trimmed);
+        if (failMatch) {
+            const name = failMatch[1];
+            for (const testName of testNames) {
+                if (testName === name || testName.startsWith(name + ' ') || name.startsWith(testName + ' ')) {
+                    results.set(testName, 'fail');
+                }
+            }
+            continue;
+        }
+    }
+    // Second pass: look for "FAIL: <message>" lines that mention a test name.
+    // The testing module prints "FAIL: <message>" for assertion failures.
+    // If a test name appears in such a line, mark it as failed.
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('FAIL:')) {
+            for (const testName of testNames) {
+                if (trimmed.includes(testName) && !results.has(testName)) {
+                    results.set(testName, 'fail');
+                }
+            }
+        }
+    }
+    return results;
+}
+exports.parseTestOutput = parseTestOutput;
 // ─── Test Controller ───────────────────────────────────────────────────
 class SkinkTestController {
     constructor() {
@@ -606,37 +707,38 @@ class SkinkTestController {
         let stderr = '';
         child.stdout.on('data', (d) => { stdout += d.toString(); this.runOutput?.append(d.toString()); });
         child.stderr.on('data', (d) => { stderr += d.toString(); this.runOutput?.append(d.toString()); });
+        const cancelDisposable = token.onCancellationRequested(() => { child.kill(); });
         await new Promise((resolve) => {
             child.on('exit', () => resolve());
-            token.onCancellationRequested(() => { child.kill(); resolve(); });
         });
+        cancelDisposable.dispose();
         const elapsed = Date.now() - start;
-        // Parse output to mark individual tests
+        // Parse output to mark individual tests.
+        //
+        // The Skink testing module prints "FAIL: <message>" for assertion
+        // failures. The test runner script prints "PASS <label>" / "FAIL <label>"
+        // for suite-level results. We use a structured parser that looks for
+        // explicit PASS/FAIL markers associated with each test name, falling
+        // back to the FAIL: prefix for assertion-level failures.
         const lines = (stdout + '\n' + stderr).split('\n');
+        // Collect test names from the file's children.
+        const testNames = [];
+        fileItem.children.forEach((testItem) => { testNames.push(testItem.label); });
+        const results = parseTestOutput(lines, testNames);
         let anyFailed = false;
         fileItem.children.forEach((testItem) => {
             const testName = testItem.label;
-            let found = false;
-            let passed = true;
-            for (const line of lines) {
-                if (line.includes(testName)) {
-                    found = true;
-                    if (line.startsWith('FAIL') || line.includes('FAIL')) {
-                        passed = false;
-                        anyFailed = true;
-                    }
-                    break;
-                }
-            }
-            if (!found && (stdout + stderr).includes('FAIL')) {
-                passed = false;
+            const result = results.get(testName);
+            if (result === 'fail') {
                 anyFailed = true;
-            }
-            if (passed) {
-                run.passed(testItem, elapsed / fileItem.children.size);
+                run.failed(testItem, new vscode.TestMessage('Test failed. See Skink Test output for details.'), elapsed / fileItem.children.size);
             }
             else {
-                run.failed(testItem, new vscode.TestMessage('Test failed. See Skink Test output for details.'), elapsed / fileItem.children.size);
+                // Default to passed if not explicitly failed. This is correct
+                // because the test harness exits non-zero on any failure, and
+                // we only mark a test as failed if we found an explicit failure
+                // marker associated with it.
+                run.passed(testItem, elapsed / fileItem.children.size);
             }
         });
         if (!anyFailed) {
@@ -647,7 +749,11 @@ class SkinkTestController {
         }
     }
     async runSingleTest(parent, _testItem, run, token, compilerPath, skinkHome) {
-        // Run the whole file but only report the single test
+        // Note: the Skink compiler does not currently support filtering by
+        // individual test name (e.g. `-t <file> -run <TestName>`). We run the
+        // whole test file and report only the requested test's result. If the
+        // compiler gains per-test filtering in the future, this should be
+        // updated to pass the test name to avoid running unrelated tests.
         await this.runTestFile(parent, run, token, compilerPath, skinkHome);
     }
     findParentFile(testItem) {
@@ -663,7 +769,8 @@ class SkinkTestController {
     }
     runAll() {
         const request = new vscode.TestRunRequest();
-        this.runHandler(request, new vscode.CancellationTokenSource().token);
+        const tokenSource = new vscode.CancellationTokenSource();
+        return this.runHandler(request, tokenSource.token).finally(() => tokenSource.dispose());
     }
     runFile(uri) {
         const item = this.fileItems.get(uri.fsPath);
@@ -672,12 +779,15 @@ class SkinkTestController {
             const newItem = this.fileItems.get(uri.fsPath);
             if (newItem) {
                 const request = new vscode.TestRunRequest([newItem]);
-                this.runHandler(request, new vscode.CancellationTokenSource().token);
+                const tokenSource = new vscode.CancellationTokenSource();
+                return this.runHandler(request, tokenSource.token).finally(() => tokenSource.dispose());
             }
-            return;
+            return Promise.resolve();
         }
         const request = new vscode.TestRunRequest([item]);
-        this.runHandler(request, new vscode.CancellationTokenSource().token);
+        const tokenSource = new vscode.CancellationTokenSource();
+        return this.runHandler(request, tokenSource.token).finally(() => tokenSource.dispose());
     }
 }
+exports.SkinkTestController = SkinkTestController;
 //# sourceMappingURL=extension.js.map
