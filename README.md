@@ -1,6 +1,6 @@
 # Skink Language Support for VS Code
 
-Provides syntax highlighting, snippets, language server integration, debugging, and testing for the [Skink](https://github.com/markoxley/skink-lang) programming language.
+Provides syntax highlighting, snippets, language server integration, debugging, and testing for the [Skink](https://github.com/markoxley/skink) programming language.
 
 ## Features
 
@@ -104,8 +104,8 @@ Example `settings.json`:
 
 ```json
 {
-  "skink.compilerPath": "/home/user/skink-lang/skink/compiler/cmd/skink/skink",
-  "skink.skinkHome": "/home/user/skink-lang/skink/compiler",
+  "skink.compilerPath": "/home/user/skink/skink",
+  "skink.skinkHome": "/home/user/skink",
   "skink.lspPath": "/home/user/skink-lsp/skink-lsp",
   "editor.defaultFormatter": "skink-lang.skink-lang",
   "editor.formatOnSave": true,
