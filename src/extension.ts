@@ -293,6 +293,8 @@ async function findSkinkCompiler(configCompilerPath?: string, folder?: vscode.Wo
 
 	// 2. Repository relative layout (extension inside repo)
 	const repoPaths = [
+		path.resolve(__dirname, '../../../skink/skink'),
+		path.resolve(__dirname, '../../../skink/skink.exe'),
 		path.resolve(__dirname, '../../skink/skink'),
 		path.resolve(__dirname, '../../skink/skink.exe'),
 		path.resolve(__dirname, '../../skink-pure/skink'),
@@ -361,6 +363,8 @@ function getSkinkHome(configSkinkHome?: string, folder?: vscode.WorkspaceFolder)
 	}
 	// 4. Repo relative
 	const repoHomes = [
+		path.resolve(__dirname, '../../../skink/std'),
+		path.resolve(__dirname, '../../../skink'),
 		path.resolve(__dirname, '../../skink/std'),
 		path.resolve(__dirname, '../../skink'),
 		path.resolve(__dirname, '../../skink-pure/std'),
